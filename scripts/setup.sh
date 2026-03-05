@@ -35,7 +35,7 @@ while [ $attempt -lt $max_attempts ]; do
   if [ $attempt -eq $max_attempts ]; then
     echo "    WARNING: Schema Registry not ready after ${max_attempts} attempts."
     echo "    Check: docker compose ps schema-registry"
-    break
+    exit 1
   fi
   echo "    Waiting for Schema Registry... (attempt ${attempt}/${max_attempts})"
   sleep 5
