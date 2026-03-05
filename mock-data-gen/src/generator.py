@@ -293,7 +293,7 @@ def main() -> None:
         )
     finally:
         _flush_all(producers)
-        logger.info("Producers flushed and closed.")
+        logger.info("Producers flushed.")
 
 
 if __name__ == "__main__":
