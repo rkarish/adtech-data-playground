@@ -73,7 +73,7 @@
         {
             "label": "stop-data-generator",
             "type": "shell",
-            "command": "docker compose --profile generator stop mock-data-gen",
+            "command": "docker compose --profile generator down mock-data-gen",
             "options": {
                 "cwd": "${workspaceFolder}"
             },
