@@ -42,7 +42,15 @@ SCHEMA_DIR = Path(os.environ.get("AVRO_SCHEMA_DIR", "/app/schemas/avro"))
 def _load_avro_serializer(
     schema_file: str, registry_client: SchemaRegistryClient
 ) -> AvroSerializer:
-    schema_str = (SCHEMA_DIR / schema_file).read_text()
+    schema_path = SCHEMA_DIR / schema_file
+    try:
+        schema_str = schema_path.read_text()
+    except (FileNotFoundError, OSError) as exc:
+        raise RuntimeError(
+            f"Failed to load Avro schema from '{schema_path}'. "
+            f"Resolved SCHEMA_DIR='{SCHEMA_DIR}'. "
+            "Check the AVRO_SCHEMA_DIR environment variable and schema bind-mount configuration."
+        ) from exc
     return AvroSerializer(registry_client, schema_str)
 
 
