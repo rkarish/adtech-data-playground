@@ -962,7 +962,7 @@ Each event type is defined as an `.avsc` file in the `schemas/avro/` directory:
 | `impression.avsc` | `Impression` | (flat) | All fields at top level: `impression_id`, `request_id`, `response_id`, `win_price`, etc. |
 | `click.avsc` | `Click` | (flat) | All fields at top level: `click_id`, `request_id`, `impression_id`, `click_url`, etc. |
 
-All schemas include an `event_timestamp` field (long, logical type `timestamp-millis`) and use `string` for UUIDs.
+All schemas include an `event_timestamp` field as a `string` (ISO-8601 timestamp) and use `string` for UUIDs.
 
 #### 8.4 Generator Changes
 
