@@ -11,7 +11,7 @@ CREATE CATALOG iceberg_catalog WITH (
     'warehouse' = 's3://warehouse/'
 );
 
--- 2. Kafka source table for bid_requests (OpenRTB 2.6 JSON)
+-- 2. Kafka source table for bid_requests (Avro via Schema Registry)
 CREATE TEMPORARY TABLE kafka_bid_requests (
     `id` STRING,
     `imp` ARRAY<ROW<
@@ -75,12 +75,11 @@ CREATE TEMPORARY TABLE kafka_bid_requests (
     'properties.bootstrap.servers' = 'kafka:9092',
     'properties.group.id' = 'flink-bid-requests',
     'scan.startup.mode' = 'earliest-offset',
-    'format' = 'json',
-    'json.fail-on-missing-field' = 'false',
-    'json.ignore-parse-errors' = 'true'
+    'format' = 'avro-confluent',
+    'avro-confluent.url' = 'http://schema-registry:8081'
 );
 
--- 3. Kafka source table for bid_responses (OpenRTB 2.6 JSON)
+-- 3. Kafka source table for bid_responses (Avro via Schema Registry)
 CREATE TEMPORARY TABLE kafka_bid_responses (
     `id` STRING,
     `seatbid` ARRAY<ROW<
@@ -111,13 +110,11 @@ CREATE TEMPORARY TABLE kafka_bid_responses (
     'properties.bootstrap.servers' = 'kafka:9092',
     'properties.group.id' = 'flink-bid-responses',
     'scan.startup.mode' = 'earliest-offset',
-    'format' = 'json',
-    'json.fail-on-missing-field' = 'false',
-    'json.ignore-parse-errors' = 'true'
+    'format' = 'avro-confluent',
+    'avro-confluent.url' = 'http://schema-registry:8081'
 );
 
--- 4. Kafka source table for impressions (flat JSON)
--- Includes event_ts computed column and watermark for window aggregations
+-- 4. Kafka source table for impressions (Avro via Schema Registry)
 CREATE TEMPORARY TABLE kafka_impressions (
     `impression_id` STRING,
     `request_id` STRING,
@@ -139,12 +136,11 @@ CREATE TEMPORARY TABLE kafka_impressions (
     'properties.bootstrap.servers' = 'kafka:9092',
     'properties.group.id' = 'flink-impressions',
     'scan.startup.mode' = 'earliest-offset',
-    'format' = 'json',
-    'json.fail-on-missing-field' = 'false',
-    'json.ignore-parse-errors' = 'true'
+    'format' = 'avro-confluent',
+    'avro-confluent.url' = 'http://schema-registry:8081'
 );
 
--- 5. Kafka source table for clicks (flat JSON)
+-- 5. Kafka source table for clicks (Avro via Schema Registry)
 CREATE TEMPORARY TABLE kafka_clicks (
     `click_id` STRING,
     `request_id` STRING,
@@ -164,9 +160,8 @@ CREATE TEMPORARY TABLE kafka_clicks (
     'properties.bootstrap.servers' = 'kafka:9092',
     'properties.group.id' = 'flink-clicks',
     'scan.startup.mode' = 'earliest-offset',
-    'format' = 'json',
-    'json.fail-on-missing-field' = 'false',
-    'json.ignore-parse-errors' = 'true'
+    'format' = 'avro-confluent',
+    'avro-confluent.url' = 'http://schema-registry:8081'
 );
 
 -- 6. Iceberg sink table for hourly_impressions_by_geo (upsert mode)

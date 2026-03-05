@@ -17,6 +17,36 @@ set -euo pipefail
 # =============================================================================
 
 ICEBERG_REST_URL="http://localhost:8181"
+SCHEMA_REGISTRY_URL="http://localhost:8082"
+
+# -----------------------------------------------------------------------------
+# Task 0: Wait for Schema Registry
+# -----------------------------------------------------------------------------
+echo "==> Waiting for Schema Registry to become ready..."
+
+max_attempts=30
+attempt=0
+while [ $attempt -lt $max_attempts ]; do
+  attempt=$((attempt + 1))
+  if curl -sf "${SCHEMA_REGISTRY_URL}/subjects" > /dev/null 2>&1; then
+    echo "    Schema Registry is ready."
+    break
+  fi
+  if [ $attempt -eq $max_attempts ]; then
+    echo "    WARNING: Schema Registry not ready after ${max_attempts} attempts."
+    echo "    Check: docker compose ps schema-registry"
+    exit 1
+  fi
+  echo "    Waiting for Schema Registry... (attempt ${attempt}/${max_attempts})"
+  sleep 5
+done
+
+echo "==> Setting Schema Registry compatibility to BACKWARD..."
+curl -sf -X PUT "${SCHEMA_REGISTRY_URL}/config" \
+  -H "Content-Type: application/vnd.schemaregistry.v1+json" \
+  -d '{"compatibility":"BACKWARD"}' > /dev/null 2>&1 \
+  && echo "    Compatibility set to BACKWARD." \
+  || echo "    WARNING: Could not set compatibility mode."
 
 # -----------------------------------------------------------------------------
 # Task 1: Create Kafka topics
@@ -500,13 +530,14 @@ echo "    Superset dashboards configured."
 # -----------------------------------------------------------------------------
 echo ""
 echo "==> Setup complete. Infrastructure is ready:"
-echo "    - Kafka topics:   bid-requests, bid-responses, impressions, clicks (3 partitions each)"
-echo "    - MinIO bucket:   s3://warehouse"
-echo "    - Iceberg tables: db.bid_requests, db.bid_responses, db.impressions, db.clicks"
-echo "                      db.bid_requests_enriched (with device classification)"
-echo "                      db.hourly_impressions_by_geo (upsert aggregation)"
-echo "                      db.rolling_metrics_by_bidder (upsert aggregation)"
-echo "    - Flink job:      Streaming Kafka -> Iceberg (check http://localhost:8081)"
-echo "    - Trino:          Query engine ready (http://localhost:8080)"
-echo "    - CloudBeaver:    Web SQL IDE ready (http://localhost:8978)"
-echo "    - Superset:       Dashboards ready (http://localhost:8088)"
+echo "    - Schema Registry: Avro schema governance (http://localhost:8082)"
+echo "    - Kafka topics:    bid-requests, bid-responses, impressions, clicks (3 partitions each)"
+echo "    - MinIO bucket:    s3://warehouse"
+echo "    - Iceberg tables:  db.bid_requests, db.bid_responses, db.impressions, db.clicks"
+echo "                       db.bid_requests_enriched (with device classification)"
+echo "                       db.hourly_impressions_by_geo (upsert aggregation)"
+echo "                       db.rolling_metrics_by_bidder (upsert aggregation)"
+echo "    - Flink job:       Streaming Kafka -> Iceberg (check http://localhost:8081)"
+echo "    - Trino:           Query engine ready (http://localhost:8080)"
+echo "    - CloudBeaver:     Web SQL IDE ready (http://localhost:8978)"
+echo "    - Superset:        Dashboards ready (http://localhost:8088)"

@@ -1,0 +1,58 @@
+{
+  "type": "record",
+  "name": "BidResponse",
+  "namespace": "com.adtech.openrtb",
+  "fields": [
+    {"name": "id", "type": "string"},
+    {
+      "name": "seatbid",
+      "type": {
+        "type": "array",
+        "items": {
+          "type": "record",
+          "name": "SeatBid",
+          "fields": [
+            {"name": "seat", "type": "string"},
+            {
+              "name": "bid",
+              "type": {
+                "type": "array",
+                "items": {
+                  "type": "record",
+                  "name": "Bid",
+                  "fields": [
+                    {"name": "id", "type": "string"},
+                    {"name": "impid", "type": "string"},
+                    {"name": "price", "type": "double"},
+                    {"name": "adid", "type": "string"},
+                    {"name": "crid", "type": "string"},
+                    {
+                      "name": "adomain",
+                      "type": {"type": "array", "items": "string"}
+                    },
+                    {"name": "w", "type": "int"},
+                    {"name": "h", "type": "int"},
+                    {"name": "dealid", "type": ["null", "string"], "default": null}
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {"name": "bidid", "type": "string"},
+    {"name": "cur", "type": "string"},
+    {
+      "name": "ext",
+      "type": {
+        "type": "record",
+        "name": "BidResponseExt",
+        "fields": [
+          {"name": "request_id", "type": "string"}
+        ]
+      }
+    },
+    {"name": "event_timestamp", "type": "string"}
+  ]
+}

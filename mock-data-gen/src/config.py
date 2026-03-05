@@ -16,6 +16,7 @@ class Config:
 
     Attributes:
         kafka_bootstrap_servers: Kafka broker address (host:port)
+        schema_registry_url: Confluent Schema Registry URL for Avro serialization
         events_per_second: Target throughput for bid requests per second
         topic_*: Kafka topic names for each event type in the funnel
         bid_response_rate: Probability (0-1) that a bid request receives a response
@@ -26,6 +27,9 @@ class Config:
     # Kafka connection settings
     kafka_bootstrap_servers: str = os.environ.get(
         "KAFKA_BOOTSTRAP_SERVERS", "kafka:9092"
+    )
+    schema_registry_url: str = os.environ.get(
+        "SCHEMA_REGISTRY_URL", "http://schema-registry:8081"
     )
 
     # Throughput control

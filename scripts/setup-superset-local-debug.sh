@@ -25,13 +25,17 @@ if [ ! -d "${VENV_DIR}" ]; then
   python3 -m venv "${VENV_DIR}"
 fi
 
+# Ensure pip is available (Debian/Ubuntu may omit it from venvs)
+echo "==> Bootstrapping pip..."
+"${VENV_DIR}/bin/python3" -m ensurepip --upgrade
+
 # Upgrade pip
 echo "==> Upgrading pip..."
-"${VENV_DIR}/bin/pip" install --upgrade pip
+"${VENV_DIR}/bin/python3" -m pip install --upgrade pip
 
-# Install dependencies using the venv's pip directly
+# Install dependencies using the venv's python -m pip (more portable than bin/pip)
 echo "==> Installing superset script dependencies..."
-"${VENV_DIR}/bin/pip" install -r "${SUPERSET_DIR}/requirements.txt"
+"${VENV_DIR}/bin/python3" -m pip install -r "${SUPERSET_DIR}/requirements.txt"
 
 echo ""
 echo "==> Local environment is ready."

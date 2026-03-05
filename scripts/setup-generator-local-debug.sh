@@ -37,13 +37,17 @@ if [ ! -d "${VENV_DIR}" ]; then
   python3 -m venv "${VENV_DIR}"
 fi
 
+# Ensure pip is available (Debian/Ubuntu may omit it from venvs)
+echo "==> Bootstrapping pip..."
+"${VENV_DIR}/bin/python3" -m ensurepip --upgrade
+
 # Upgrade pip
 echo "==> Upgrading pip..."
-"${VENV_DIR}/bin/pip" install --upgrade pip
+"${VENV_DIR}/bin/python3" -m pip install --upgrade pip
 
-# Install dependencies using the venv's pip directly
+# Install dependencies using the venv's python -m pip (more portable than bin/pip)
 echo "==> Installing mock-data-gen package..."
-"${VENV_DIR}/bin/pip" install "${MOCK_DIR}"
+"${VENV_DIR}/bin/python3" -m pip install "${MOCK_DIR}"
 
 echo ""
 echo "==> Local debug environment is ready."

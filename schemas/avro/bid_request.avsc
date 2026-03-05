@@ -1,0 +1,159 @@
+{
+  "type": "record",
+  "name": "BidRequest",
+  "namespace": "com.adtech.openrtb",
+  "fields": [
+    {"name": "id", "type": "string"},
+    {
+      "name": "imp",
+      "type": {
+        "type": "array",
+        "items": {
+          "type": "record",
+          "name": "Impression",
+          "fields": [
+            {"name": "id", "type": "string"},
+            {
+              "name": "banner",
+              "type": {
+                "type": "record",
+                "name": "Banner",
+                "fields": [
+                  {"name": "w", "type": "int"},
+                  {"name": "h", "type": "int"},
+                  {"name": "pos", "type": "int"}
+                ]
+              }
+            },
+            {"name": "bidfloor", "type": "double"},
+            {"name": "bidfloorcur", "type": "string"},
+            {"name": "secure", "type": "int"}
+          ]
+        }
+      }
+    },
+    {
+      "name": "device",
+      "type": {
+        "type": "record",
+        "name": "Device",
+        "fields": [
+          {"name": "ua", "type": "string"},
+          {"name": "ip", "type": "string"},
+          {
+            "name": "geo",
+            "type": {
+              "type": "record",
+              "name": "Geo",
+              "fields": [
+                {"name": "lat", "type": "double"},
+                {"name": "lon", "type": "double"},
+                {"name": "country", "type": "string"},
+                {"name": "region", "type": "string"}
+              ]
+            }
+          },
+          {"name": "devicetype", "type": "int"},
+          {"name": "os", "type": "string"},
+          {"name": "osv", "type": "string"}
+        ]
+      }
+    },
+    {
+      "name": "user",
+      "type": {
+        "type": "record",
+        "name": "User",
+        "fields": [
+          {"name": "id", "type": "string"},
+          {"name": "buyeruid", "type": "string"}
+        ]
+      }
+    },
+    {"name": "at", "type": "int"},
+    {"name": "tmax", "type": "int"},
+    {
+      "name": "cur",
+      "type": {"type": "array", "items": "string"}
+    },
+    {
+      "name": "source",
+      "type": {
+        "type": "record",
+        "name": "Source",
+        "fields": [
+          {"name": "fd", "type": "int"},
+          {"name": "tid", "type": "string"}
+        ]
+      }
+    },
+    {
+      "name": "regs",
+      "type": {
+        "type": "record",
+        "name": "Regs",
+        "fields": [
+          {"name": "coppa", "type": "int"},
+          {
+            "name": "ext",
+            "type": {
+              "type": "record",
+              "name": "RegsExt",
+              "fields": [
+                {"name": "gdpr", "type": "int"}
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "site",
+      "type": ["null", {
+        "type": "record",
+        "name": "Site",
+        "fields": [
+          {"name": "id", "type": "string"},
+          {"name": "domain", "type": "string"},
+          {
+            "name": "cat",
+            "type": {"type": "array", "items": "string"}
+          },
+          {"name": "page", "type": "string"},
+          {
+            "name": "publisher",
+            "type": {
+              "type": "record",
+              "name": "Publisher",
+              "fields": [
+                {"name": "id", "type": "string"},
+                {"name": "name", "type": "string"}
+              ]
+            }
+          }
+        ]
+      }],
+      "default": null
+    },
+    {
+      "name": "app",
+      "type": ["null", {
+        "type": "record",
+        "name": "App",
+        "fields": [
+          {"name": "id", "type": "string"},
+          {"name": "bundle", "type": "string"},
+          {"name": "storeurl", "type": "string"},
+          {
+            "name": "cat",
+            "type": {"type": "array", "items": "string"}
+          },
+          {"name": "publisher", "type": "Publisher"}
+        ]
+      }],
+      "default": null
+    },
+    {"name": "event_timestamp", "type": "string"},
+    {"name": "received_at", "type": "string"}
+  ]
+}

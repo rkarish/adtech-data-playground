@@ -68,14 +68,38 @@ services:
       retries: 5
       start_period: 10s
 
+  schema-registry:
+    image: confluentinc/cp-schema-registry:7.8.0
+    container_name: schema-registry
+    ports:
+      - "8082:8081"
+    environment:
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: kafka:9092
+      SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
+    depends_on:
+      kafka:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8081/subjects || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
   mock-data-gen:
     build: ./mock-data-gen
     profiles: ["generator"]
     depends_on:
       kafka:
         condition: service_healthy
+      schema-registry:
+        condition: service_healthy
+    volumes:
+      - ./schemas/avro:/app/schemas/avro:ro
     environment:
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      SCHEMA_REGISTRY_URL: http://schema-registry:8081
       EVENTS_PER_SECOND: 10
       TOPIC_BID_REQUESTS: bid-requests
       TOPIC_BID_RESPONSES: bid-responses

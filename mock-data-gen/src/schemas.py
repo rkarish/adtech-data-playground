@@ -187,14 +187,13 @@ def generate_bid_request(base_ts: datetime | None = None) -> dict:
             storeurl = f"https://apps.apple.com/app/id{random.randint(100000000, 999999999)}"
         else:
             storeurl = f"https://play.google.com/store/apps/details?id={app_bundle}"
-        inventory_source = {
-            "app": {
-                "id": app_id,
-                "bundle": app_bundle,
-                "storeurl": storeurl,
-                "cat": categories,
-                "publisher": {"id": pub_id, "name": pub_name},
-            }
+        site_obj = None
+        app_obj = {
+            "id": app_id,
+            "bundle": app_bundle,
+            "storeurl": storeurl,
+            "cat": categories,
+            "publisher": {"id": pub_id, "name": pub_name},
         }
     else:
         # Generate site object for web traffic
@@ -202,15 +201,14 @@ def generate_bid_request(base_ts: datetime | None = None) -> dict:
         domain = fake.domain_name()
         page_path = fake.uri_path()
         page_url = f"https://{domain}/{page_path}"
-        inventory_source = {
-            "site": {
-                "id": site_id,
-                "domain": domain,
-                "cat": categories,
-                "page": page_url,
-                "publisher": {"id": pub_id, "name": pub_name},
-            }
+        site_obj = {
+            "id": site_id,
+            "domain": domain,
+            "cat": categories,
+            "page": page_url,
+            "publisher": {"id": pub_id, "name": pub_name},
         }
+        app_obj = None
 
     # Auction settings
     # at=1: First-price auction (winner pays their bid)
@@ -293,8 +291,10 @@ def generate_bid_request(base_ts: datetime | None = None) -> dict:
         "received_at": received_at.isoformat(),
     }
 
-    # Add either site or app object (mutually exclusive per OpenRTB spec)
-    bid_request.update(inventory_source)
+    # Add site and app objects (mutually exclusive per OpenRTB spec,
+    # but both keys must be present for Avro union type compatibility)
+    bid_request["site"] = site_obj
+    bid_request["app"] = app_obj
 
     return bid_request
 
@@ -355,11 +355,9 @@ def generate_bid_response(bid_request: dict) -> dict:
         "adomain": [random.choice(AD_DOMAINS)],  # Advertiser domain(s)
         "w": imp["banner"]["w"],  # Creative width (matches request)
         "h": imp["banner"]["h"],  # Creative height (matches request)
+        # 10% of bids are part of a Private Marketplace deal (explicit None for Avro)
+        "dealid": random.choice(DEAL_IDS) if random.random() < 0.10 else None,
     }
-
-    # 10% of bids are part of a Private Marketplace deal
-    if random.random() < 0.10:
-        bid_obj["dealid"] = random.choice(DEAL_IDS)
 
     return {
         "id": fake.uuid4(),  # Unique response ID

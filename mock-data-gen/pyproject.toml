@@ -7,7 +7,7 @@ name = "mock-data-gen"
 version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
-    "kafka-python-ng>=2.0.2",
+    "confluent-kafka[avro]>=2.6.0",
     "faker>=22.0.0",
 ]
 

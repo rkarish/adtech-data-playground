@@ -302,6 +302,12 @@ parsed.writeStream \
                     +--------+--------+
                              |
                              v
+                   +-------------------+
+                   | Schema Registry   |
+                   | (Avro schemas)    |
+                   +-------------------+
+                             |
+                             v
                     +-----------------+
                     |   Apache Kafka  |
                     |   (KRaft mode)  |
@@ -339,7 +345,7 @@ parsed.writeStream \
 | Service | Image / Base | Port | Purpose |
 |---|---|---|---|
 | `kafka` | `apache/kafka` (KRaft) | 9092 | Message broker, no ZooKeeper |
-| `schema-registry` | `confluentinc/cp-schema-registry` | 8081 | Avro/JSON schema management |
+| `schema-registry` | `confluentinc/cp-schema-registry:7.8.0` | 8082 | Avro schema governance & compatibility |
 | `mock-data-gen` | Custom (Python) | -- | Generates OpenRTB events to Kafka |
 | `iceberg-rest` | `tabulario/iceberg-rest` | 8181 | Iceberg REST catalog |
 | `minio` | `minio/minio` | 9000/9001 | S3-compatible object storage |
@@ -473,6 +479,12 @@ streaming-data-lake/
   trino/
     catalog/
       iceberg.properties            # Trino Iceberg catalog config
+  schemas/
+    avro/
+      bid_request.avsc              # Avro schema for BidRequest
+      bid_response.avsc             # Avro schema for BidResponse
+      impression.avsc               # Avro schema for Impression
+      click.avsc                    # Avro schema for Click
   scripts/
     setup.sh                        # Initialize topics, schemas, tables
     query-examples.sh               # Sample Trino queries
@@ -905,6 +917,201 @@ GROUP BY
 - **Watermarks**: Requires proper watermark configuration for event-time processing
 - **Late data**: Events arriving after the window closes will be dropped; configure allowed lateness if needed
 - **Separate job**: Run as a separate Flink job from the Phase 6 aggregations for independent lifecycle management
+
+### Phase 8: Schema Evolution with Schema Registry + Avro
+
+#### 8.1 Overview & Motivation
+
+The platform currently suffers from a **triple schema problem**:
+
+1. **Generator dict schemas** -- Python dictionaries in `schemas.py` define the shape of each event type, but only implicitly via code. There is no formal schema definition.
+2. **Kafka JSON with no validation** -- Events are serialized as free-form JSON with no schema enforcement at the broker level. A typo in a field name, a missing field, or a type change silently produces invalid data.
+3. **Flink SQL DDL must match exactly** -- Flink source table column definitions must precisely match the JSON structure. Any mismatch causes silent data loss (fields read as `NULL`) or job failures.
+
+This triple mismatch creates several operational risks:
+
+- **Silent data loss**: If the generator adds or renames a field, Flink silently drops it because the DDL does not declare it.
+- **Manual synchronization**: Any schema change requires updating three places (generator, Kafka topic assumptions, Flink DDL) in lockstep.
+- **No backward compatibility enforcement**: Nothing prevents a breaking change from being deployed.
+
+Schema Registry with Avro serialization solves all three problems by providing a single source of truth for event schemas with compatibility enforcement.
+
+#### 8.2 Schema Registry Integration
+
+**Service**: Confluent Schema Registry (`confluentinc/cp-schema-registry:7.8.0`) is already included in the Docker Compose stack, exposed on host port 8082.
+
+**Compatibility mode**: `BACKWARD` (default). This means new schemas can:
+- Add fields with default values
+- Remove optional fields
+
+But cannot:
+- Remove required fields
+- Change field types
+- Rename fields
+
+**Auto-registration**: Producers (the mock data generator) register schemas automatically on first produce. Each Kafka topic gets a subject in the registry (e.g., `bid-requests-value`). Subsequent schema versions are validated against the compatibility rules before registration succeeds.
+
+#### 8.3 Avro Schema Design
+
+Each event type is defined as an `.avsc` file in the `schemas/avro/` directory:
+
+| Schema File | Root Record | Key Nested Records | Notes |
+|---|---|---|---|
+| `bid_request.avsc` | `BidRequest` | `Impression` (with nested `Banner`), `Site`, `App`, `Device` (with nested `Geo`), `User`, `Source`, `Regs` | `site` and `app` use an Avro union (`["null", "Site"]` / `["null", "App"]`) since a request has one or the other |
+| `bid_response.avsc` | `BidResponse` | `SeatBid` (with nested `Bid`) | `seatbid` is an array of `SeatBid` records, each containing an array of `Bid` records |
+| `impression.avsc` | `Impression` | (flat) | All fields at top level: `impression_id`, `request_id`, `response_id`, `win_price`, etc. |
+| `click.avsc` | `Click` | (flat) | All fields at top level: `click_id`, `request_id`, `impression_id`, `click_url`, etc. |
+
+All schemas include an `event_timestamp` field as a `string` (ISO-8601 timestamp) and use `string` for UUIDs.
+
+#### 8.4 Generator Changes
+
+**Dependency change**: Replace `kafka-python-ng` with `confluent-kafka[avro]` in `pyproject.toml`. The `confluent-kafka` library provides:
+
+- `SerializingProducer` -- a Kafka producer that serializes values using a pluggable serializer
+- `AvroSerializer` -- serializes Python dicts to Avro binary format, with automatic schema registration
+
+**Producer initialization**:
+```python
+from confluent_kafka import SerializingProducer
+from confluent_kafka.schema_registry import SchemaRegistryClient
+from confluent_kafka.schema_registry.avro import AvroSerializer
+
+schema_registry_client = SchemaRegistryClient({"url": "http://schema-registry:8081"})
+
+# Load .avsc schema from file
+with open("schemas/avro/bid_request.avsc") as f:
+    schema_str = f.read()
+
+avro_serializer = AvroSerializer(schema_registry_client, schema_str)
+
+producer = SerializingProducer({
+    "bootstrap.servers": "kafka:9092",
+    "value.serializer": avro_serializer,
+})
+```
+
+**Schema file loading**: The generator loads `.avsc` files from the `schemas/avro/` directory at startup. Each topic gets its own `AvroSerializer` instance with the corresponding schema.
+
+**Data generation**: The existing `generate_*` functions in `schemas.py` continue to return Python dicts. The `AvroSerializer` handles serialization and validates each dict against the Avro schema before producing.
+
+#### 8.5 Flink SQL Changes
+
+**Format change**: Replace `'format' = 'json'` with `'format' = 'avro-confluent'` in all Kafka source table DDLs, and point to the Schema Registry URL:
+
+```sql
+CREATE TABLE kafka_bid_requests (
+  -- Column definitions unchanged
+  request_id STRING,
+  imp_id STRING,
+  ...
+  event_timestamp TIMESTAMP(3),
+  -- Computed columns unchanged
+  received_at AS NOW(),
+  -- Watermark unchanged
+  WATERMARK FOR event_timestamp AS event_timestamp - INTERVAL '5' SECOND
+) WITH (
+  'connector' = 'kafka',
+  'topic' = 'bid-requests',
+  'properties.bootstrap.servers' = 'kafka:9092',
+  'properties.group.id' = 'flink-bid-requests',
+  'scan.startup.mode' = 'earliest-offset',
+  'format' = 'avro-confluent',
+  'avro-confluent.url' = 'http://schema-registry:8081'
+);
+```
+
+**What stays the same**:
+- Column definitions (names and types) remain unchanged
+- Computed columns (e.g., `received_at AS NOW()`) remain unchanged
+- Watermark definitions remain unchanged
+- Iceberg sink table definitions remain unchanged (they use the Iceberg connector, not Avro)
+
+**What changes**:
+- `'format' = 'json'` becomes `'format' = 'avro-confluent'`
+- `'json.fail-on-missing-field' = 'false'` and other JSON-specific options are removed
+- `'avro-confluent.url'` is added, pointing to the Schema Registry internal URL
+
+The `avro-confluent` format in Flink automatically fetches the schema from the registry and deserializes Avro binary data. When a new schema version is registered, Flink picks up new fields automatically on the next read (subject to the column definitions in the DDL).
+
+#### 8.6 Schema Evolution Workflow
+
+When a new field needs to be added to an event type, the following steps are performed:
+
+1. **Modify the `.avsc` schema file**: Add the new field with a `"default"` value. This ensures backward compatibility (consumers using the old schema can still read new data, and the default fills in for old data read with the new schema).
+
+2. **Update the generator**: Modify the `generate_*` function in `schemas.py` to populate the new field. This is optional if the default value is acceptable for all records.
+
+3. **New schema auto-registered**: On the next `produce()` call, the `AvroSerializer` detects the schema has changed and registers the new version with the Schema Registry. The registry validates backward compatibility before accepting it.
+
+4. **Flink picks up new fields**: The `avro-confluent` format deserializer in Flink automatically handles the new schema version. However, to actually surface the new field in query results, the Flink source table DDL must also be updated to include the new column.
+
+5. **Add column to Iceberg table**: Run `ALTER TABLE iceberg_catalog.db.<table> ADD COLUMN <field> <type>` via Flink SQL or Trino to add the new column to the Iceberg table. Existing Parquet files are unaffected (reads return `NULL` for the new column in old files).
+
+6. **Update Flink DDL and restart**: Add the new column to the Flink Kafka source table DDL and the corresponding INSERT statement. Restart the Flink job to pick up the DDL change.
+
+#### 8.7 Demo Scenario: Adding `viewability_score` to Impressions
+
+This walkthrough demonstrates adding a new `viewability_score` field (double, default 0.0) to the impressions event type.
+
+**Step 1 -- Update the Avro schema** (`schemas/avro/impression.avsc`):
+```json
+{
+  "name": "viewability_score",
+  "type": "double",
+  "default": 0.0,
+  "doc": "Viewability score from 0.0 to 1.0"
+}
+```
+Add this field to the `fields` array in the Impression record.
+
+**Step 2 -- Update the generator** (`mock-data-gen/src/schemas.py`):
+```python
+def generate_impression(bid_request, bid_response):
+    return {
+        ...
+        "viewability_score": random.uniform(0.3, 1.0),
+    }
+```
+
+**Step 3 -- Produce new events**: Restart the mock data generator. On the first produce to the `impressions` topic, the `AvroSerializer` registers schema version 2 with the Schema Registry. The registry validates that adding `viewability_score` with a default is backward-compatible and accepts it.
+
+**Step 4 -- Add column to Iceberg table**:
+```sql
+ALTER TABLE iceberg_catalog.db.impressions ADD COLUMN viewability_score DOUBLE;
+```
+
+**Step 5 -- Update Flink DDL**: Add `viewability_score DOUBLE` to the `kafka_impressions` source table DDL in `create_tables.sql` and add the column to the INSERT statement in `insert_jobs.sql`.
+
+**Step 6 -- Restart the Flink job**: Resubmit the Flink SQL job. New impression records now include `viewability_score`. Old records in Iceberg return `NULL` for this column (or `0.0` if backfilled).
+
+**Verification**: Query via Trino to confirm:
+```sql
+SELECT impression_id, win_price, viewability_score
+FROM iceberg.db.impressions
+ORDER BY event_timestamp DESC
+LIMIT 10;
+```
+
+#### 8.8 New Files
+
+| File | Description |
+|---|---|
+| `schemas/avro/bid_request.avsc` | Avro schema for BidRequest with nested Impression, Banner, Site, App, Device, Geo, User, Source, Regs records |
+| `schemas/avro/bid_response.avsc` | Avro schema for BidResponse with nested SeatBid and Bid records |
+| `schemas/avro/impression.avsc` | Avro schema for Impression events (flat structure) |
+| `schemas/avro/click.avsc` | Avro schema for Click events (flat structure) |
+
+#### 8.9 Modified Files Summary
+
+| File | Changes |
+|---|---|
+| `mock-data-gen/pyproject.toml` | Replace `kafka-python-ng` with `confluent-kafka[avro]` |
+| `mock-data-gen/src/generator.py` | Replace `KafkaProducer` with `SerializingProducer` + `AvroSerializer`; load `.avsc` schemas at startup |
+| `mock-data-gen/src/schemas.py` | No structural changes (still returns dicts); Avro serializer validates output |
+| `streaming/flink/sql/create_tables.sql` | Change `format` from `json` to `avro-confluent`; add `avro-confluent.url` property; remove JSON-specific options |
+| `streaming/flink/sql/insert_jobs.sql` | No changes required (column mappings unchanged) |
+| `docker-compose.yml` | Update schema-registry port mapping; mount `schemas/avro/` into mock-data-gen container |
 
 ### Forward-Looking
 
