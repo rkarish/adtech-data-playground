@@ -132,7 +132,7 @@ def create_producers() -> dict[str, SerializingProducer]:
                 delay = min(delay * 2, max_delay)
 
     logger.info(
-        "Connected to Kafka at %s (Schema Registry: %s)",
+        "Initialized Kafka producers for %s (Schema Registry: %s)",
         config.kafka_bootstrap_servers,
         config.schema_registry_url,
     )
