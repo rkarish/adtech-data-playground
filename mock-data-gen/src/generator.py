@@ -109,6 +109,10 @@ def create_producers() -> dict[str, SerializingProducer]:
                     "key.serializer": key_serializer,
                     "value.serializer": avro_serializer,
                 })
+                # Force a metadata request to ensure the broker is reachable.
+                # This makes the retry loop effective, since construction alone
+                # typically does not contact Kafka.
+                producer.list_topics(timeout=5.0)
                 producers[topic] = producer
                 logger.info("Created Avro producer for topic '%s'", topic)
                 break
