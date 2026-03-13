@@ -1,4 +1,4 @@
--- Flink SQL DDL: Register catalogs and source tables
+-- Flink SQL DDL: Register catalogs, create Iceberg tables, and source tables
 
 -- 1. Register Iceberg REST catalog
 CREATE CATALOG iceberg_catalog WITH (
@@ -10,6 +10,8 @@ CREATE CATALOG iceberg_catalog WITH (
     's3.path-style-access' = 'true',
     'warehouse' = 's3://warehouse/'
 );
+
+CREATE DATABASE IF NOT EXISTS iceberg_catalog.db;
 
 -- 2. Kafka source table for bid_requests (Avro via Schema Registry)
 CREATE TEMPORARY TABLE kafka_bid_requests (
@@ -164,34 +166,129 @@ CREATE TEMPORARY TABLE kafka_clicks (
     'avro-confluent.url' = 'http://schema-registry:8081'
 );
 
--- 6. Iceberg sink table for hourly_impressions_by_geo (upsert mode)
--- Explicit sink definition required for Flink-Iceberg upsert writes
--- PK: (window_start, device_geo_country) matches Iceberg identifier-field-ids
-CREATE TABLE iceberg_hourly_impressions_by_geo (
+-- 6. Iceberg append-only tables (created via catalog DDL)
+
+CREATE TABLE IF NOT EXISTS iceberg_catalog.db.bid_requests (
+    `request_id` STRING,
+    `imp_id` STRING,
+    `imp_banner_w` INT,
+    `imp_banner_h` INT,
+    `imp_bidfloor` DOUBLE,
+    `site_id` STRING,
+    `site_domain` STRING,
+    `site_cat` ARRAY<STRING>,
+    `publisher_id` STRING,
+    `device_type` INT,
+    `device_os` STRING,
+    `device_geo_country` STRING,
+    `device_geo_region` STRING,
+    `user_id` STRING,
+    `auction_type` INT,
+    `tmax` INT,
+    `currency` STRING,
+    `is_coppa` BOOLEAN,
+    `is_gdpr` BOOLEAN,
+    `event_timestamp` TIMESTAMP_LTZ(6),
+    `received_at` TIMESTAMP_LTZ(6)
+) PARTITIONED BY (days(`event_timestamp`), `device_geo_country`)
+WITH ('format-version' = '2');
+
+CREATE TABLE IF NOT EXISTS iceberg_catalog.db.bid_responses (
+    `response_id` STRING,
+    `request_id` STRING,
+    `seat` STRING,
+    `bid_id` STRING,
+    `imp_id` STRING,
+    `bid_price` DOUBLE,
+    `creative_id` STRING,
+    `deal_id` STRING,
+    `ad_domain` STRING,
+    `currency` STRING,
+    `event_timestamp` TIMESTAMP_LTZ(6)
+) PARTITIONED BY (days(`event_timestamp`))
+WITH ('format-version' = '2');
+
+CREATE TABLE IF NOT EXISTS iceberg_catalog.db.impressions (
+    `impression_id` STRING,
+    `request_id` STRING,
+    `response_id` STRING,
+    `imp_id` STRING,
+    `bidder_id` STRING,
+    `win_price` DOUBLE,
+    `win_currency` STRING,
+    `creative_id` STRING,
+    `ad_domain` STRING,
+    `event_timestamp` TIMESTAMP_LTZ(6)
+) PARTITIONED BY (days(`event_timestamp`))
+WITH ('format-version' = '2');
+
+CREATE TABLE IF NOT EXISTS iceberg_catalog.db.clicks (
+    `click_id` STRING,
+    `request_id` STRING,
+    `impression_id` STRING,
+    `imp_id` STRING,
+    `bidder_id` STRING,
+    `creative_id` STRING,
+    `click_url` STRING,
+    `event_timestamp` TIMESTAMP_LTZ(6)
+) PARTITIONED BY (days(`event_timestamp`))
+WITH ('format-version' = '2');
+
+CREATE TABLE IF NOT EXISTS iceberg_catalog.db.bid_requests_enriched (
+    `request_id` STRING,
+    `imp_id` STRING,
+    `imp_banner_w` INT,
+    `imp_banner_h` INT,
+    `imp_bidfloor` DOUBLE,
+    `imp_bidfloor_usd` DOUBLE,
+    `imp_bidfloorcur` STRING,
+    `site_id` STRING,
+    `site_domain` STRING,
+    `app_id` STRING,
+    `app_bundle` STRING,
+    `publisher_id` STRING,
+    `device_type` INT,
+    `device_os` STRING,
+    `device_ip` STRING,
+    `device_geo_country` STRING,
+    `device_geo_region` STRING,
+    `device_category` STRING,
+    `user_id` STRING,
+    `auction_type` INT,
+    `currency` STRING,
+    `is_coppa` BOOLEAN,
+    `is_gdpr` BOOLEAN,
+    `is_test_traffic` BOOLEAN,
+    `is_private_ip` BOOLEAN,
+    `event_timestamp` TIMESTAMP_LTZ(6),
+    `received_at` TIMESTAMP_LTZ(6)
+) PARTITIONED BY (days(`event_timestamp`), `device_category`)
+WITH ('format-version' = '2');
+
+CREATE TABLE IF NOT EXISTS iceberg_catalog.db.dq_rejected_events (
+    `request_id` STRING,
+    `imp_id` STRING,
+    `publisher_id` STRING,
+    `device_ip` STRING,
+    `reject_reason` STRING,
+    `event_timestamp` TIMESTAMP_LTZ(6)
+) PARTITIONED BY (days(`event_timestamp`))
+WITH ('format-version' = '2');
+
+-- 7. Iceberg upsert tables (created via catalog DDL with PRIMARY KEY)
+-- Flink's PRIMARY KEY on catalog tables sets identifier-field-ids automatically.
+
+CREATE TABLE IF NOT EXISTS iceberg_catalog.db.hourly_impressions_by_geo (
     `window_start` TIMESTAMP(3),
     `device_geo_country` STRING,
     `impression_count` BIGINT,
     `total_revenue` DOUBLE,
     `avg_win_price` DOUBLE,
     PRIMARY KEY (`window_start`, `device_geo_country`) NOT ENFORCED
-) WITH (
-    'connector' = 'iceberg',
-    'catalog-type' = 'rest',
-    'uri' = 'http://iceberg-rest:8181',
-    'io-impl' = 'org.apache.iceberg.aws.s3.S3FileIO',
-    's3.endpoint' = 'http://minio:9000',
-    's3.path-style-access' = 'true',
-    'warehouse' = 's3://warehouse/',
-    'catalog-name' = 'iceberg_catalog',
-    'catalog-database' = 'db',
-    'catalog-table' = 'hourly_impressions_by_geo',
-    'upsert-enabled' = 'true'
-);
+) PARTITIONED BY (days(`window_start`))
+WITH ('format-version' = '2', 'write.upsert.enabled' = 'true');
 
--- 7. Iceberg sink table for rolling_metrics_by_bidder (upsert mode)
--- Explicit sink definition required for Flink-Iceberg upsert writes
--- PK: (window_start, bidder_id) matches Iceberg identifier-field-ids
-CREATE TABLE iceberg_rolling_metrics_by_bidder (
+CREATE TABLE IF NOT EXISTS iceberg_catalog.db.rolling_metrics_by_bidder (
     `window_start` TIMESTAMP(3),
     `window_end` TIMESTAMP(3),
     `bidder_id` STRING,
@@ -199,24 +296,10 @@ CREATE TABLE iceberg_rolling_metrics_by_bidder (
     `revenue` DOUBLE,
     `avg_cpm` DOUBLE,
     PRIMARY KEY (`window_start`, `bidder_id`) NOT ENFORCED
-) WITH (
-    'connector' = 'iceberg',
-    'catalog-type' = 'rest',
-    'uri' = 'http://iceberg-rest:8181',
-    'io-impl' = 'org.apache.iceberg.aws.s3.S3FileIO',
-    's3.endpoint' = 'http://minio:9000',
-    's3.path-style-access' = 'true',
-    'warehouse' = 's3://warehouse/',
-    'catalog-name' = 'iceberg_catalog',
-    'catalog-database' = 'db',
-    'catalog-table' = 'rolling_metrics_by_bidder',
-    'upsert-enabled' = 'true'
-);
+) PARTITIONED BY (days(`window_start`))
+WITH ('format-version' = '2', 'write.upsert.enabled' = 'true');
 
--- 8. Iceberg sink table for hourly_funnel_by_publisher (upsert mode)
--- Funnel metrics: bid_requests -> bid_responses -> impressions -> clicks
--- PK: (window_start, publisher_id) matches Iceberg identifier-field-ids
-CREATE TABLE iceberg_hourly_funnel_by_publisher (
+CREATE TABLE IF NOT EXISTS iceberg_catalog.db.hourly_funnel_by_publisher (
     `window_start` TIMESTAMP(3),
     `publisher_id` STRING,
     `bid_requests` BIGINT,
@@ -227,23 +310,10 @@ CREATE TABLE iceberg_hourly_funnel_by_publisher (
     `win_rate` DOUBLE,
     `ctr` DOUBLE,
     PRIMARY KEY (`window_start`, `publisher_id`) NOT ENFORCED
-) WITH (
-    'connector' = 'iceberg',
-    'catalog-type' = 'rest',
-    'uri' = 'http://iceberg-rest:8181',
-    'io-impl' = 'org.apache.iceberg.aws.s3.S3FileIO',
-    's3.endpoint' = 'http://minio:9000',
-    's3.path-style-access' = 'true',
-    'warehouse' = 's3://warehouse/',
-    'catalog-name' = 'iceberg_catalog',
-    'catalog-database' = 'db',
-    'catalog-table' = 'hourly_funnel_by_publisher',
-    'upsert-enabled' = 'true'
-);
+) PARTITIONED BY (days(`window_start`))
+WITH ('format-version' = '2', 'write.upsert.enabled' = 'true');
 
--- 9. Iceberg sink table for dq_event_quality_hourly (upsert mode)
--- PK: (window_start)
-CREATE TABLE iceberg_dq_event_quality_hourly (
+CREATE TABLE IF NOT EXISTS iceberg_catalog.db.dq_event_quality_hourly (
     `window_start` TIMESTAMP(3),
     `total_bid_requests` BIGINT,
     `unique_bid_requests` BIGINT,
@@ -267,23 +337,10 @@ CREATE TABLE iceberg_dq_event_quality_hourly (
     `duplicate_events_all` BIGINT,
     `duplicate_rate_all` DOUBLE,
     PRIMARY KEY (`window_start`) NOT ENFORCED
-) WITH (
-    'connector' = 'iceberg',
-    'catalog-type' = 'rest',
-    'uri' = 'http://iceberg-rest:8181',
-    'io-impl' = 'org.apache.iceberg.aws.s3.S3FileIO',
-    's3.endpoint' = 'http://minio:9000',
-    's3.path-style-access' = 'true',
-    'warehouse' = 's3://warehouse/',
-    'catalog-name' = 'iceberg_catalog',
-    'catalog-database' = 'db',
-    'catalog-table' = 'dq_event_quality_hourly',
-    'upsert-enabled' = 'true'
-);
+) PARTITIONED BY (days(`window_start`))
+WITH ('format-version' = '2', 'write.upsert.enabled' = 'true');
 
--- 10. Iceberg sink table for bid_landscape_hourly (upsert mode)
--- PK: (window_start, publisher_id)
-CREATE TABLE iceberg_bid_landscape_hourly (
+CREATE TABLE IF NOT EXISTS iceberg_catalog.db.bid_landscape_hourly (
     `window_start` TIMESTAMP(3),
     `publisher_id` STRING,
     `request_count` BIGINT,
@@ -292,23 +349,10 @@ CREATE TABLE iceberg_bid_landscape_hourly (
     `avg_bid_price` DOUBLE,
     `max_bid_price` DOUBLE,
     PRIMARY KEY (`window_start`, `publisher_id`) NOT ENFORCED
-) WITH (
-    'connector' = 'iceberg',
-    'catalog-type' = 'rest',
-    'uri' = 'http://iceberg-rest:8181',
-    'io-impl' = 'org.apache.iceberg.aws.s3.S3FileIO',
-    's3.endpoint' = 'http://minio:9000',
-    's3.path-style-access' = 'true',
-    'warehouse' = 's3://warehouse/',
-    'catalog-name' = 'iceberg_catalog',
-    'catalog-database' = 'db',
-    'catalog-table' = 'bid_landscape_hourly',
-    'upsert-enabled' = 'true'
-);
+) PARTITIONED BY (days(`window_start`))
+WITH ('format-version' = '2', 'write.upsert.enabled' = 'true');
 
--- 11. Iceberg sink table for realtime_serving_metrics_1m (upsert mode)
--- PK: (window_start, bidder_id)
-CREATE TABLE iceberg_realtime_serving_metrics_1m (
+CREATE TABLE IF NOT EXISTS iceberg_catalog.db.realtime_serving_metrics_1m (
     `window_start` TIMESTAMP(3),
     `bidder_id` STRING,
     `impressions` BIGINT,
@@ -316,23 +360,10 @@ CREATE TABLE iceberg_realtime_serving_metrics_1m (
     `revenue` DOUBLE,
     `ctr` DOUBLE,
     PRIMARY KEY (`window_start`, `bidder_id`) NOT ENFORCED
-) WITH (
-    'connector' = 'iceberg',
-    'catalog-type' = 'rest',
-    'uri' = 'http://iceberg-rest:8181',
-    'io-impl' = 'org.apache.iceberg.aws.s3.S3FileIO',
-    's3.endpoint' = 'http://minio:9000',
-    's3.path-style-access' = 'true',
-    'warehouse' = 's3://warehouse/',
-    'catalog-name' = 'iceberg_catalog',
-    'catalog-database' = 'db',
-    'catalog-table' = 'realtime_serving_metrics_1m',
-    'upsert-enabled' = 'true'
-);
+) PARTITIONED BY (days(`window_start`))
+WITH ('format-version' = '2', 'write.upsert.enabled' = 'true');
 
--- 12. Iceberg sink table for funnel_leakage_hourly (upsert mode)
--- PK: (window_start, publisher_id)
-CREATE TABLE iceberg_funnel_leakage_hourly (
+CREATE TABLE IF NOT EXISTS iceberg_catalog.db.funnel_leakage_hourly (
     `window_start` TIMESTAMP(3),
     `publisher_id` STRING,
     `requests_no_response` BIGINT,
@@ -342,16 +373,5 @@ CREATE TABLE iceberg_funnel_leakage_hourly (
     `impression_leakage_rate` DOUBLE,
     `click_leakage_rate` DOUBLE,
     PRIMARY KEY (`window_start`, `publisher_id`) NOT ENFORCED
-) WITH (
-    'connector' = 'iceberg',
-    'catalog-type' = 'rest',
-    'uri' = 'http://iceberg-rest:8181',
-    'io-impl' = 'org.apache.iceberg.aws.s3.S3FileIO',
-    's3.endpoint' = 'http://minio:9000',
-    's3.path-style-access' = 'true',
-    'warehouse' = 's3://warehouse/',
-    'catalog-name' = 'iceberg_catalog',
-    'catalog-database' = 'db',
-    'catalog-table' = 'funnel_leakage_hourly',
-    'upsert-enabled' = 'true'
-);
+) PARTITIONED BY (days(`window_start`))
+WITH ('format-version' = '2', 'write.upsert.enabled' = 'true');

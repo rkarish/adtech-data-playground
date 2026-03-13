@@ -1741,6 +1741,80 @@ The old Docker Compose Flink deployment (`flink-jobmanager`, `flink-taskmanager`
 - **Shared SQL files**: Both deployment modes use the same SQL files in `streaming/flink/sql/`
 - **K8s Services for cross-network routing**: Session mode deploys headless Services (`kafka`, `schema-registry`, `iceberg-rest`, `minio`) with manual Endpoints, allowing Flink SQL to use Docker Compose hostnames without `sed`-based rewriting
 
+### Phase 11: Iceberg Table Creation via Flink SQL DDL
+
+#### 11.1 Overview & Motivation
+
+Prior to this phase, Iceberg tables were created in two places:
+
+1. **`setup.sh` Task 3** — 13 tables created via Iceberg REST API `POST /v1/namespaces/db/tables` with explicit JSON schemas, partition specs, and `identifier-field-ids` for upsert tables.
+2. **`create_tables.sql`** — 7 upsert sink tables redefined as standalone Flink connector tables (duplicating schema and connection properties) because Flink's catalog-based `CREATE TABLE` sets `identifier-field-ids` automatically from `PRIMARY KEY`, eliminating the REST API workaround.
+
+This dual-source approach had several problems:
+
+- **Schema drift risk**: Table schemas were defined in both shell script JSON payloads and Flink SQL DDL. Any column addition or type change required coordinated edits in two files with different syntaxes.
+- **Redundant connection config**: Each standalone sink table repeated 8 lines of connector properties (`uri`, `s3.endpoint`, `warehouse`, etc.) — configuration that the registered catalog already provides.
+- **Ordering dependency**: `setup.sh` had to create tables before Flink started, creating a brittle startup sequence.
+- **~650 lines of boilerplate**: The REST API payloads in `setup.sh` were the largest block of code in the script.
+
+#### 11.2 Design: Flink SQL DDL as Single Source of Truth
+
+All 13 Iceberg tables are now created in `create_tables.sql` using the registered `iceberg_catalog`:
+
+```sql
+CREATE DATABASE IF NOT EXISTS iceberg_catalog.db;
+
+-- Append-only tables
+CREATE TABLE IF NOT EXISTS iceberg_catalog.db.bid_requests (
+    ...
+) PARTITIONED BY (days(`event_timestamp`), `device_geo_country`)
+WITH ('format-version' = '2');
+
+-- Upsert tables (PRIMARY KEY sets identifier-field-ids automatically)
+CREATE TABLE IF NOT EXISTS iceberg_catalog.db.hourly_impressions_by_geo (
+    ...
+    PRIMARY KEY (`window_start`, `device_geo_country`) NOT ENFORCED
+) PARTITIONED BY (days(`window_start`))
+WITH ('format-version' = '2', 'write.upsert.enabled' = 'true');
+```
+
+Key properties:
+
+- **`CREATE TABLE IF NOT EXISTS`** — idempotent; safe to re-run on restart without dropping data.
+- **`PARTITIONED BY`** — uses Flink's `days()` transform, equivalent to Iceberg's `day` partition transform.
+- **`PRIMARY KEY ... NOT ENFORCED`** on catalog tables — Flink automatically sets `identifier-field-ids` on the Iceberg table metadata, which is required for upsert mode. This eliminates the need to set `identifier-field-ids` manually via the REST API.
+- **`WITH ('format-version' = '2', 'write.upsert.enabled' = 'true')`** — table properties set at creation time.
+
+#### 11.3 Changes
+
+**`create_tables.sql`**:
+- Added `CREATE DATABASE IF NOT EXISTS iceberg_catalog.db` after catalog registration.
+- Added 6 append-only tables: `bid_requests`, `bid_responses`, `impressions`, `clicks`, `bid_requests_enriched`, `dq_rejected_events`.
+- Replaced 7 standalone-connector upsert tables with catalog-based `CREATE TABLE IF NOT EXISTS iceberg_catalog.db.*` definitions using `PRIMARY KEY` and `PARTITIONED BY`.
+
+**`aggregation_jobs.sql`** and **`funnel_jobs.sql`**:
+- Changed INSERT targets from standalone table names (e.g., `iceberg_hourly_impressions_by_geo`) to catalog paths (e.g., `iceberg_catalog.db.hourly_impressions_by_geo`).
+
+**`setup.sh`**:
+- Removed Task 3 (~650 lines): REST API namespace creation and 13 table creation payloads.
+- Removed `ICEBERG_REST_URL` variable (no longer needed).
+- Renumbered remaining tasks. Tables now appear after Flink starts and runs `create_tables.sql`.
+
+#### 11.4 Trade-offs
+
+- **Tables only exist after Flink starts**: The REST API approach created tables before any Flink job ran. Now, Trino won't see tables until the first Flink job executes `create_tables.sql`. The setup script's Trino polling loop (Task 4) handles this by waiting up to 60 seconds for tables to appear.
+- **Schema evolution**: Adding columns now only requires editing `create_tables.sql`. However, `CREATE TABLE IF NOT EXISTS` won't alter an existing table — schema evolution on existing tables still requires `ALTER TABLE` or recreation.
+
+#### 11.5 Files Changed
+
+| File | Change | Description |
+|---|---|---|
+| `streaming/flink/sql/create_tables.sql` | Modified | Add `CREATE DATABASE`, 6 append-only tables, replace 7 standalone upsert tables with catalog-based DDL |
+| `streaming/flink/sql/aggregation_jobs.sql` | Modified | Change 5 INSERT targets to catalog paths |
+| `streaming/flink/sql/funnel_jobs.sql` | Modified | Change 2 INSERT targets to catalog paths |
+| `scripts/setup.sh` | Modified | Remove Task 3 (REST API table creation), remove `ICEBERG_REST_URL`, renumber tasks |
+| `README.md` | Modified | Update setup step 2 description |
+
 ### Forward-Looking
 
 The following areas are candidates for future design phases:
