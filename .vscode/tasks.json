@@ -99,6 +99,62 @@
             "problemMatcher": []
         },
         {
+            "label": "redeploy-sql: ingestion (session-mode)",
+            "type": "shell",
+            "command": "bash scripts/redeploy-sql.sh ingestion",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated",
+                "clear": true
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "redeploy-sql: aggregation (session-mode)",
+            "type": "shell",
+            "command": "bash scripts/redeploy-sql.sh aggregation",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated",
+                "clear": true
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "redeploy-sql: funnel (session-mode)",
+            "type": "shell",
+            "command": "bash scripts/redeploy-sql.sh funnel",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated",
+                "clear": true
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "redeploy-sql: all (session-mode)",
+            "type": "shell",
+            "command": "bash scripts/redeploy-sql.sh all",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated",
+                "clear": true
+            },
+            "problemMatcher": []
+        },
+        {
             "label": "teardown-flink-k8s",
             "type": "shell",
             "command": "bash k8s/scripts/teardown-k8s.sh",
