@@ -7,11 +7,11 @@ set -euo pipefail
 # Run this script AFTER `docker compose up -d` to initialize:
 #   1. Kafka topics (bid-requests, bid-responses, impressions, clicks)
 #   2. MinIO bucket (warehouse)
-#   3. Flink streaming jobs on Kubernetes (application or session mode)
-#      Iceberg namespace + 13 tables are created by Flink SQL DDL (create_tables.sql)
-#   4. Trino connectivity verification
-#   5. CloudBeaver readiness check
-#   6. Superset readiness check and dashboard setup
+#   3. Iceberg tables via PyIceberg (iceberg/tables/*.yml)
+#   4. Flink streaming jobs on Kubernetes (application or session mode)
+#   5. Trino connectivity verification
+#   6. CloudBeaver readiness check
+#   7. Superset readiness check and dashboard setup
 #
 # Environment variables:
 #   FLINK_MODE  - "application" (default) or "session"
@@ -77,14 +77,39 @@ docker exec minio mc mb --ignore-existing local/warehouse
 echo "    MinIO bucket 'warehouse' is ready."
 
 # -----------------------------------------------------------------------------
-# Task 3: Deploy Flink streaming jobs on Kubernetes
-# Iceberg namespace and tables are created by Flink SQL DDL (create_tables.sql)
+# Task 3: Create Iceberg tables via PyIceberg
+# Table schemas are defined in iceberg/tables/*.yml and applied using PyIceberg.
+# Tables must exist before Flink starts so INSERT INTO targets are available.
+# -----------------------------------------------------------------------------
+echo "==> Waiting for Iceberg REST catalog to become ready..."
+
+max_attempts=12
+attempt=0
+while [ $attempt -lt $max_attempts ]; do
+  attempt=$((attempt + 1))
+  if curl -sf "http://localhost:8181/v1/config" > /dev/null 2>&1; then
+    echo "    Iceberg REST catalog is ready."
+    break
+  fi
+  if [ $attempt -eq $max_attempts ]; then
+    echo "    ERROR: Iceberg REST catalog not ready after ${max_attempts} attempts."
+    exit 1
+  fi
+  echo "    Waiting for Iceberg REST catalog... (attempt ${attempt}/${max_attempts})"
+  sleep 5
+done
+
+echo "==> Creating Iceberg tables from YAML definitions..."
+"$SCRIPT_DIR/../.venv/bin/python" "$SCRIPT_DIR/../iceberg/apply_tables.py"
+
+# -----------------------------------------------------------------------------
+# Task 4: Deploy Flink streaming jobs on Kubernetes
 # -----------------------------------------------------------------------------
 echo "==> Deploying Flink streaming jobs on Kubernetes (${FLINK_MODE} mode)..."
 bash "$SCRIPT_DIR/../k8s/scripts/setup-k8s.sh" --mode "$FLINK_MODE"
 
 # -----------------------------------------------------------------------------
-# Task 4: Verify Trino connectivity
+# Task 5: Verify Trino connectivity
 # -----------------------------------------------------------------------------
 echo "==> Verifying Trino can query the Iceberg catalog..."
 
@@ -114,7 +139,7 @@ while [ $attempt -lt $max_attempts ]; do
 done
 
 # -----------------------------------------------------------------------------
-# Task 5: Wait for CloudBeaver
+# Task 6: Wait for CloudBeaver
 # -----------------------------------------------------------------------------
 echo "==> Waiting for CloudBeaver to become ready..."
 
@@ -136,7 +161,7 @@ while [ $attempt -lt $max_attempts ]; do
 done
 
 # -----------------------------------------------------------------------------
-# Task 6: Wait for Superset and set up dashboards
+# Task 7: Wait for Superset and set up dashboards
 # -----------------------------------------------------------------------------
 echo "==> Waiting for Superset to become ready..."
 
@@ -169,7 +194,7 @@ echo "==> Setup complete. Infrastructure is ready:"
 echo "    - Schema Registry: Avro schema governance (http://localhost:8085)"
 echo "    - Kafka topics:    bid-requests, bid-responses, impressions, clicks (3 partitions each)"
 echo "    - MinIO bucket:    s3://warehouse"
-echo "    - Iceberg tables:  13 tables created by Flink SQL DDL (create_tables.sql)"
+echo "    - Iceberg tables:  13 tables created by PyIceberg (iceberg/tables/*.yml)"
 echo "    - Flink jobs:      Running on K8s (${FLINK_MODE} mode)"
 if [ "$FLINK_MODE" = "application" ]; then
 echo "    - Flink UI:        http://localhost:8081 (ingestion)"
