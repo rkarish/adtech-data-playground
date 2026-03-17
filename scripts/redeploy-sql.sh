@@ -3,8 +3,8 @@
 # redeploy-sql.sh — Hot-redeploy Flink SQL jobs without rebuilding the image
 #
 # Session mode only. Cancels the running Flink job for the specified group,
-# copies updated SQL from your local workspace into the session cluster pod,
-# and resubmits via sql-client.sh.
+# then streams updated SQL from your local workspace into a temporary
+# kubectl-run sql-client pod attached to the session cluster to resubmit them.
 #
 # Usage: redeploy-sql.sh <ingestion|aggregation|funnel|all>
 # =============================================================================
@@ -23,7 +23,8 @@ case "$JOB" in
 Usage: redeploy-sql.sh <ingestion|aggregation|funnel|all>
 
 Hot-redeploy Flink SQL jobs in session mode without rebuilding the image.
-Cancels the running job, copies updated SQL files, and resubmits.
+Cancels the running job, then streams updated local SQL into a temporary
+sql-client pod (via kubectl run) connected to the session cluster to resubmit.
 
 Jobs:
   ingestion   — Raw Kafka-to-Iceberg inserts  (insert_jobs.sql)
