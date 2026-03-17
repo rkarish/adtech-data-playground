@@ -77,7 +77,7 @@ Mock Data Gen  --->  Kafka (KRaft)         ┌─ Docker Compose ───┐
 ## Prerequisites
 
 - Docker and Docker Compose
-- Docker Desktop with Kubernetes enabled (for Flink deployment)
+- Docker Desktop with Kubernetes enabled (for Flink deployment). This project primarily supports the **Kind-based backend** (Docker Desktop 4.27+). The older Kubeadm backend is compatible but not actively tested.
 - `kubectl` and `helm` CLI tools
 - Python 3.12+ (for local development only)
   - On Ubuntu/Debian, also install `python3-venv`: `sudo apt install python3-venv`

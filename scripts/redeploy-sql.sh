@@ -95,16 +95,21 @@ cancel_job() {
   job_id=$(echo "$job_list" | grep "$marker" | grep -oE '[a-f0-9]{32}' | head -1) || true
 
   if [[ -n "$job_id" ]]; then
-    kubectl -n "$NAMESPACE" exec "$SESSION_POD" -- \
-      /opt/flink/bin/flink cancel "$job_id" 2>&1 | sed 's/^/    /'
-    echo "    Cancelled $job_id"
+    if kubectl -n "$NAMESPACE" exec "$SESSION_POD" -- \
+      wget -qO /dev/null --method=PATCH "http://localhost:8081/jobs/$job_id" 2>/dev/null; then
+      echo "    Cancelled $job_id"
+    else
+      echo "    WARNING: Failed to cancel job $job_id"
+    fi
   else
     echo "    No running job found for '$name' — skipping cancel."
   fi
 }
 
 # ---------------------------------------------------------------------------
-# Copy SQL files to pod and submit via sql-client.sh
+# Submit SQL via a temporary pod (same pattern as the K8s session-mode Jobs).
+# Local SQL files are piped in via stdin; the pod connects to the session
+# cluster's REST endpoint, submits the SQL, and is cleaned up automatically.
 # ---------------------------------------------------------------------------
 submit_job() {
   local name="$1"
@@ -113,12 +118,16 @@ submit_job() {
 
   echo "==> Deploying '$name' ($dml_file)..."
 
-  kubectl -n "$NAMESPACE" cp "$SQL_DIR/create_tables.sql" "$SESSION_POD:/tmp/create_tables.sql"
-  kubectl -n "$NAMESPACE" cp "$SQL_DIR/$dml_file" "$SESSION_POD:/tmp/$dml_file"
-
-  kubectl -n "$NAMESPACE" exec "$SESSION_POD" -- \
-    bash -c "cat /tmp/create_tables.sql /tmp/$dml_file > /tmp/combined_${name}.sql && \
-             /opt/flink/bin/sql-client.sh -f /tmp/combined_${name}.sql" 2>&1 | sed 's/^/    /'
+  cat "$SQL_DIR/create_tables.sql" "$SQL_DIR/$dml_file" | \
+    kubectl -n "$NAMESPACE" run "redeploy-${name}" --rm -i --restart=Never \
+      --image=adtech-flink:latest \
+      --image-pull-policy=Never \
+      --env=AWS_ACCESS_KEY_ID=admin \
+      --env=AWS_SECRET_ACCESS_KEY=password \
+      --env=AWS_REGION=us-east-1 \
+      -- bash -c "cat > /tmp/combined.sql && \
+                  /opt/flink/bin/sql-client.sh -f /tmp/combined.sql \
+                  -Drest.address=flink-session-rest.flink -Drest.port=8081" 2>&1 | sed 's/^/    /'
 
   echo "    '$name' submitted."
 }

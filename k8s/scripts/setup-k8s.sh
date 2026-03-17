@@ -74,6 +74,13 @@ CONTAINER_ID=$(docker create adtech-flink:latest)
 mkdir -p /tmp/flink/usrlib
 docker cp "$CONTAINER_ID:/opt/flink/usrlib/flink-sql-runner.jar" /tmp/flink/usrlib/flink-sql-runner.jar
 docker rm "$CONTAINER_ID" >/dev/null
+# Docker Desktop's Kind-based K8s backend runs the node as a Docker container
+# with its own containerd. Images must be explicitly imported into it.
+# The older Kubeadm backend shared the Docker daemon, so this isn't needed there.
+if docker inspect desktop-control-plane &>/dev/null; then
+  echo "  Loading image into Kubernetes node's containerd..."
+  docker save adtech-flink:latest | docker exec -i desktop-control-plane ctr --namespace k8s.io images import -
+fi
 echo ""
 
 echo "[3/6] Creating flink namespace and installing Flink Kubernetes Operator $FLINK_OPERATOR_VERSION..."
