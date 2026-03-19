@@ -1975,8 +1975,38 @@ Update the Flink SQL pipeline to pass through the new fields:
 
 - **Schema drift**: After adding columns to `bid_responses.yml`, running `apply_tables.py` against an existing catalog with the old schema will report drift. The table must be dropped and recreated, or an `ALTER TABLE ADD COLUMN` run manually.
 - **UNNEST positional destructuring**: Adding fields to the Avro schema means adding them to every UNNEST alias list that touches `seatbid[].bid[]`. Missing a single one causes field misalignment.
-- **Cross-directory import**: The `seed_dimensions.py` script in `iceberg/` imports from `mock-data-gen/src/dimension_mapping.py` via `sys.path` manipulation. Acceptable for a local dev tool.
-- **Reporting queries deferred**: This phase creates the dimension tables and populates them, but does not add reporting views or Trino queries that join facts with dimensions. That is a follow-up effort.
+- **Package layout**: The mock-data-gen package was restructured from `src/` to `mock_data_gen/` for proper Python packaging. The `seed_dimensions.py` script imports `mock_data_gen.dimension_mapping` via `sys.path` since it runs outside the package context.
+
+#### 12.13 Trino Views
+
+9 Trino views in `trino/views.sql` pre-join fact tables with current dimension attributes (`is_current = true`). Applied at setup time via `trino/apply_views.sh`. All views use `CREATE OR REPLACE` for idempotency.
+
+The `v_full_funnel` view is a row-level 4-way LEFT JOIN across the entire event funnel (request → response → impression → click) with all dimension attributes and boolean stage flags (`has_response`, `has_impression`, `has_click`) for drop-off analysis.
+
+For time-travel reporting (what was the dimension value when the event occurred), query the fact tables directly and join on `valid_from`/`valid_to` ranges instead of `is_current`.
+
+#### 12.14 Incremental Materialization
+
+Materialized tables (`mat_*`) are physical Iceberg copies of the views for dashboard performance. Managed by `scripts/materialize.sh` with high-watermark-based incremental updates.
+
+**Watermark tracking**: The `materialization_watermarks` table stores one row per materialized table with the timestamp of the last successful run.
+
+**Three-pass incremental strategy**:
+
+1. **Dimension changes**: For each dimension FK, check if any dimension rows have `valid_from > watermark`. If so, DELETE affected mat rows and re-INSERT from the live view with fresh dimension values.
+2. **New facts**: INSERT rows from the view where `event_timestamp > watermark`.
+3. **Late funnel events** (mat_full_funnel only): Repair rows where the request was materialized with `has_response/has_impression/has_click = false` but the downstream event now exists. Uses existence checks against the live fact tables, then DELETE + re-INSERT from the view.
+
+**First run**: If no materialized table exists, creates it via `CREATE TABLE AS SELECT * FROM v_*` (full load).
+
+**Orchestration**: Currently a manual script; will be moved to Apache Airflow for scheduled, observable execution.
+
+#### 12.15 Considerations
+
+- **Schema drift**: After adding columns to `bid_responses.yml`, running `apply_tables.py` against an existing catalog with the old schema will report drift. The table must be dropped and recreated, or an `ALTER TABLE ADD COLUMN` run manually.
+- **UNNEST positional destructuring**: Adding fields to the Avro schema means adding them to every UNNEST alias list that touches `seatbid[].bid[]`. Missing a single one causes field misalignment.
+- **Funnel repair boundary effect**: The mock data generator produces all funnel stages synchronously, so the late-event repair pass rarely triggers. In production with independent event sources, the repair pass would catch events split across batch boundaries.
+- **Delete file accumulation**: The dimension change and funnel repair passes produce Iceberg delete files. Run `maintenance.sh` after materialization to compact them.
 
 ### Forward-Looking
 
