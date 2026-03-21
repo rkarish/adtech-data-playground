@@ -1975,7 +1975,7 @@ Update the Flink SQL pipeline to pass through the new fields:
 
 - **Schema drift**: After adding columns to `bid_responses.yml`, running `apply_tables.py` against an existing catalog with the old schema will report drift. The table must be dropped and recreated, or an `ALTER TABLE ADD COLUMN` run manually.
 - **UNNEST positional destructuring**: Adding fields to the Avro schema means adding them to every UNNEST alias list that touches `seatbid[].bid[]`. Missing a single one causes field misalignment.
-- **Package layout**: The mock-data-gen package was restructured from `src/` to `mock_data_gen/` for proper Python packaging. The `seed_dimensions.py` script imports `mock_data_gen.dimension_mapping` via `sys.path` since it runs outside the package context.
+- **Package layout**: The mock-data-gen package was restructured from `src/` to `mock_data_gen/` for proper Python packaging. The `seed_dimensions.py` script imports `mock_data_gen.dimension_mapping` directly, relying on `scripts/setup.sh` to install the package into the virtualenv so it is available on the Python path.
 
 #### 12.13 Trino Views
 
