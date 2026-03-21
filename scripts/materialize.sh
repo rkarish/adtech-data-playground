@@ -87,7 +87,7 @@ for entry in "${MATERIALIZATIONS[@]}"; do
       " 2>/dev/null || true
       ${TRINO} --execute "
         INSERT INTO iceberg.db.materialization_watermarks
-        VALUES ('${mat_table}', (SELECT MAX(${fact_ts_col}) FROM iceberg.db.${fact_table}))
+        SELECT '${mat_table}', MAX(${fact_ts_col}) FROM iceberg.db.${fact_table}
       " 2>/dev/null
     else
       echo "    FAIL  Could not create ${mat_table}"
@@ -107,7 +107,7 @@ for entry in "${MATERIALIZATIONS[@]}"; do
       echo "    OK    Full load: ${row_count} rows"
       ${TRINO} --execute "
         INSERT INTO iceberg.db.materialization_watermarks
-        VALUES ('${mat_table}', (SELECT MAX(${fact_ts_col}) FROM iceberg.db.${fact_table}))
+        SELECT '${mat_table}', MAX(${fact_ts_col}) FROM iceberg.db.${fact_table}
       " 2>/dev/null
     else
       echo "    FAIL  Full load failed"
@@ -125,18 +125,12 @@ for entry in "${MATERIALIZATIONS[@]}"; do
       SELECT CAST(TIMESTAMP '${watermark}' - INTERVAL '${LOOKBACK_HOURS}' HOUR AS VARCHAR)
     ")
 
-    # Aggregate tables (window_start): always re-materialize the lookback window
-    # Raw fact tables: detect via count comparison, repair only if mismatch
+    # Skip lookback repair for Flink aggregate tables — their windows are
+    # immutable once closed, so late arrivals cannot affect them.
+    # Only raw fact tables and cross-fact joins need lookback repair.
     needs_repair=false
     if [ "$fact_ts_col" = "window_start" ]; then
-      mat_count=$(trino_query "
-        SELECT count(*) FROM iceberg.db.${mat_table}
-        WHERE ${view_ts_col} >= TIMESTAMP '${lookback_start}'
-          AND ${view_ts_col} <= TIMESTAMP '${watermark}'
-      ")
-      if [ "${mat_count:-0}" != "0" ]; then
-        needs_repair=true
-      fi
+      echo "    Skipping lookback (Flink aggregate, windows are immutable)"
     else
       fact_count=$(trino_query "
         SELECT count(*) FROM iceberg.db.${fact_table}
@@ -330,7 +324,7 @@ for entry in "${MATERIALIZATIONS[@]}"; do
   " 2>/dev/null || true
   ${TRINO} --execute "
     INSERT INTO iceberg.db.materialization_watermarks
-    VALUES ('${mat_table}', (SELECT MAX(${fact_ts_col}) FROM iceberg.db.${fact_table}))
+    SELECT '${mat_table}', MAX(${fact_ts_col}) FROM iceberg.db.${fact_table}
   " 2>/dev/null
 
   echo "    OK"

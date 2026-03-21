@@ -102,10 +102,10 @@ done
 echo "==> Creating Iceberg tables from YAML definitions..."
 VENV_PYTHON="$SCRIPT_DIR/../.venv/bin/python"
 if [ ! -x "$VENV_PYTHON" ]; then
-  echo "    Virtual environment not found. Creating .venv and installing dependencies..."
+  echo "    Virtual environment not found. Creating .venv..."
   python3 -m venv "$SCRIPT_DIR/../.venv"
-  "$VENV_PYTHON" -m pip install --quiet -r "$SCRIPT_DIR/../iceberg/requirements.txt"
 fi
+"$VENV_PYTHON" -m pip install --quiet -r "$SCRIPT_DIR/../iceberg/requirements.txt"
 "$VENV_PYTHON" -m pip install --quiet -e "$SCRIPT_DIR/../mock-data-gen"
 "$VENV_PYTHON" "$SCRIPT_DIR/../iceberg/apply_tables.py"
 
@@ -212,7 +212,7 @@ echo "==> Setup complete. Infrastructure is ready:"
 echo "    - Schema Registry: Avro schema governance (http://localhost:8085)"
 echo "    - Kafka topics:    bid-requests, bid-responses, impressions, clicks (3 partitions each)"
 echo "    - MinIO bucket:    s3://warehouse"
-echo "    - Iceberg tables:  26 tables created by PyIceberg (13 fact + 13 dimension)"
+echo "    - Iceberg tables:  27 tables created by PyIceberg (13 dimension + 14 fact/aggregate)"
 echo "    - Flink jobs:      Running on K8s (${FLINK_MODE} mode)"
 if [ "$FLINK_MODE" = "application" ]; then
 echo "    - Flink UI:        http://localhost:8081 (ingestion)"

@@ -234,6 +234,7 @@ SELECT
     ddt.device_type_name,
     ddt.is_mobile,
     br.device_os,
+    dos.os_vendor,
     br.device_geo_country,
     br.device_geo_region,
     dg.country_name,
@@ -299,6 +300,8 @@ LEFT JOIN iceberg.db.dim_publisher dp
     ON br.publisher_id = dp.publisher_id AND dp.is_current = true
 LEFT JOIN iceberg.db.dim_device_type ddt
     ON br.device_type = ddt.device_type_code AND ddt.is_current = true
+LEFT JOIN iceberg.db.dim_device_os dos
+    ON br.device_os = dos.os_name AND dos.is_current = true
 LEFT JOIN iceberg.db.dim_geo dg
     ON br.device_geo_country = dg.country_code
     AND br.device_geo_region = dg.region_code
