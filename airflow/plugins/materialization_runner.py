@@ -105,7 +105,7 @@ def pass_0_lookback_repair(
     lookback_start = str(
         _fetch_scalar(
             hook,
-            f"SELECT CAST(TIMESTAMP '{watermark}' "
+            f"SELECT CAST(TIMESTAMP WITH TIME ZONE '{watermark}' "
             f"- INTERVAL '{lookback_hours}' HOUR AS VARCHAR)",
         )
     )
@@ -114,8 +114,8 @@ def pass_0_lookback_repair(
         _fetch_scalar(
             hook,
             f"SELECT count(*) FROM iceberg.db.{entry.fact_table} "
-            f"WHERE {entry.fact_ts_col} >= TIMESTAMP '{lookback_start}' "
-            f"AND {entry.fact_ts_col} <= TIMESTAMP '{watermark}'",
+            f"WHERE {entry.fact_ts_col} >= TIMESTAMP WITH TIME ZONE '{lookback_start}' "
+            f"AND {entry.fact_ts_col} <= TIMESTAMP WITH TIME ZONE '{watermark}'",
         )
         or 0
     )
@@ -123,8 +123,8 @@ def pass_0_lookback_repair(
         _fetch_scalar(
             hook,
             f"SELECT count(*) FROM iceberg.db.{entry.mat_table} "
-            f"WHERE {entry.view_ts_col} >= TIMESTAMP '{lookback_start}' "
-            f"AND {entry.view_ts_col} <= TIMESTAMP '{watermark}'",
+            f"WHERE {entry.view_ts_col} >= TIMESTAMP WITH TIME ZONE '{lookback_start}' "
+            f"AND {entry.view_ts_col} <= TIMESTAMP WITH TIME ZONE '{watermark}'",
         )
         or 0
     )
@@ -140,21 +140,21 @@ def pass_0_lookback_repair(
 
     hook.run(
         f"DELETE FROM iceberg.db.{entry.mat_table} "
-        f"WHERE {entry.view_ts_col} >= TIMESTAMP '{lookback_start}' "
-        f"AND {entry.view_ts_col} <= TIMESTAMP '{watermark}'"
+        f"WHERE {entry.view_ts_col} >= TIMESTAMP WITH TIME ZONE '{lookback_start}' "
+        f"AND {entry.view_ts_col} <= TIMESTAMP WITH TIME ZONE '{watermark}'"
     )
     hook.run(
         f"INSERT INTO iceberg.db.{entry.mat_table} "
         f"SELECT * FROM iceberg.db.{entry.view_name} "
-        f"WHERE {entry.view_ts_col} >= TIMESTAMP '{lookback_start}' "
-        f"AND {entry.view_ts_col} <= TIMESTAMP '{watermark}'"
+        f"WHERE {entry.view_ts_col} >= TIMESTAMP WITH TIME ZONE '{lookback_start}' "
+        f"AND {entry.view_ts_col} <= TIMESTAMP WITH TIME ZONE '{watermark}'"
     )
 
     repaired = _fetch_scalar(
         hook,
         f"SELECT count(*) FROM iceberg.db.{entry.mat_table} "
-        f"WHERE {entry.view_ts_col} >= TIMESTAMP '{lookback_start}' "
-        f"AND {entry.view_ts_col} <= TIMESTAMP '{watermark}'",
+        f"WHERE {entry.view_ts_col} >= TIMESTAMP WITH TIME ZONE '{lookback_start}' "
+        f"AND {entry.view_ts_col} <= TIMESTAMP WITH TIME ZONE '{watermark}'",
     )
     logger.info(
         "Repaired lookback window [%s .. %s]: %s rows",
@@ -183,7 +183,7 @@ def pass_1_dimension_repair(
         lookback_start = str(
             _fetch_scalar(
                 hook,
-                f"SELECT CAST(TIMESTAMP '{watermark}' "
+                f"SELECT CAST(TIMESTAMP WITH TIME ZONE '{watermark}' "
                 f"- INTERVAL '{lookback_hours}' HOUR AS VARCHAR)",
             )
         )
@@ -193,7 +193,7 @@ def pass_1_dimension_repair(
             _fetch_scalar(
                 hook,
                 f"SELECT count(*) FROM iceberg.db.{dc.dim_table} "
-                f"WHERE valid_from > TIMESTAMP '{watermark}'",
+                f"WHERE valid_from > TIMESTAMP WITH TIME ZONE '{watermark}'",
             )
             or 0
         )
@@ -208,14 +208,14 @@ def pass_1_dimension_repair(
         dim_repair_upper = ""
         if lookback_start:
             dim_repair_upper = (
-                f"AND {entry.view_ts_col} < TIMESTAMP '{lookback_start}'"
+                f"AND {entry.view_ts_col} < TIMESTAMP WITH TIME ZONE '{lookback_start}'"
             )
 
         hook.run(
             f"DELETE FROM iceberg.db.{entry.mat_table} "
             f"WHERE {dc.fk_col} IN ("
             f"  SELECT {dc.dim_pk} FROM iceberg.db.{dc.dim_table} "
-            f"  WHERE valid_from > TIMESTAMP '{watermark}'"
+            f"  WHERE valid_from > TIMESTAMP WITH TIME ZONE '{watermark}'"
             f") {dim_repair_upper}"
         )
 
@@ -224,8 +224,8 @@ def pass_1_dimension_repair(
             f"SELECT * FROM iceberg.db.{entry.view_name} "
             f"WHERE {dc.fk_col} IN ("
             f"  SELECT {dc.dim_pk} FROM iceberg.db.{dc.dim_table} "
-            f"  WHERE valid_from > TIMESTAMP '{watermark}'"
-            f") AND {entry.view_ts_col} <= TIMESTAMP '{watermark}' "
+            f"  WHERE valid_from > TIMESTAMP WITH TIME ZONE '{watermark}'"
+            f") AND {entry.view_ts_col} <= TIMESTAMP WITH TIME ZONE '{watermark}' "
             f"{dim_repair_upper}"
         )
 
@@ -245,7 +245,7 @@ def pass_2_new_data_append(entry: MaterializationEntry, watermark: str) -> int:
         _fetch_scalar(
             hook,
             f"SELECT count(*) FROM iceberg.db.{entry.fact_table} "
-            f"WHERE {entry.fact_ts_col} > TIMESTAMP '{watermark}'",
+            f"WHERE {entry.fact_ts_col} > TIMESTAMP WITH TIME ZONE '{watermark}'",
         )
         or 0
     )
@@ -257,7 +257,7 @@ def pass_2_new_data_append(entry: MaterializationEntry, watermark: str) -> int:
     hook.run(
         f"INSERT INTO iceberg.db.{entry.mat_table} "
         f"SELECT * FROM iceberg.db.{entry.view_name} "
-        f"WHERE {entry.view_ts_col} > TIMESTAMP '{watermark}'"
+        f"WHERE {entry.view_ts_col} > TIMESTAMP WITH TIME ZONE '{watermark}'"
     )
     logger.info("Appended %d new fact rows to %s", new_rows, entry.mat_table)
     return new_rows
@@ -271,7 +271,7 @@ def pass_3_funnel_repair(watermark: str) -> int:
         _fetch_scalar(
             hook,
             f"SELECT count(*) FROM iceberg.db.mat_full_funnel m "
-            f"WHERE m.request_timestamp <= TIMESTAMP '{watermark}' "
+            f"WHERE m.request_timestamp <= TIMESTAMP WITH TIME ZONE '{watermark}' "
             f"AND m.has_response = false "
             f"AND EXISTS (SELECT 1 FROM iceberg.db.bid_responses r "
             f"WHERE r.request_id = m.request_id)",
@@ -283,7 +283,7 @@ def pass_3_funnel_repair(watermark: str) -> int:
         _fetch_scalar(
             hook,
             f"SELECT count(*) FROM iceberg.db.mat_full_funnel m "
-            f"WHERE m.request_timestamp <= TIMESTAMP '{watermark}' "
+            f"WHERE m.request_timestamp <= TIMESTAMP WITH TIME ZONE '{watermark}' "
             f"AND m.has_impression = false AND m.has_response = true "
             f"AND EXISTS ("
             f"  SELECT 1 FROM iceberg.db.impressions i "
@@ -297,7 +297,7 @@ def pass_3_funnel_repair(watermark: str) -> int:
         _fetch_scalar(
             hook,
             f"SELECT count(*) FROM iceberg.db.mat_full_funnel m "
-            f"WHERE m.request_timestamp <= TIMESTAMP '{watermark}' "
+            f"WHERE m.request_timestamp <= TIMESTAMP WITH TIME ZONE '{watermark}' "
             f"AND m.has_click = false AND m.has_impression = true "
             f"AND EXISTS ("
             f"  SELECT 1 FROM iceberg.db.clicks c "
@@ -321,7 +321,7 @@ def pass_3_funnel_repair(watermark: str) -> int:
 
     hook.run(
         f"DELETE FROM iceberg.db.mat_full_funnel "
-        f"WHERE request_timestamp <= TIMESTAMP '{watermark}' "
+        f"WHERE request_timestamp <= TIMESTAMP WITH TIME ZONE '{watermark}' "
         f"AND ("
         f"  (has_response = false AND EXISTS ("
         f"    SELECT 1 FROM iceberg.db.bid_responses r "
@@ -343,20 +343,20 @@ def pass_3_funnel_repair(watermark: str) -> int:
         f"SELECT v.* FROM iceberg.db.v_event_enriched_full_funnel v "
         f"WHERE v.request_id IN ("
         f"  SELECT br.request_id FROM iceberg.db.bid_requests br "
-        f"  WHERE br.event_timestamp <= TIMESTAMP '{watermark}' "
+        f"  WHERE br.event_timestamp <= TIMESTAMP WITH TIME ZONE '{watermark}' "
         f"  AND ("
         f"    EXISTS (SELECT 1 FROM iceberg.db.bid_responses r "
         f"      WHERE r.request_id = br.request_id "
-        f"      AND r.event_timestamp > TIMESTAMP '{watermark}')"
+        f"      AND r.event_timestamp > TIMESTAMP WITH TIME ZONE '{watermark}')"
         f"    OR EXISTS (SELECT 1 FROM iceberg.db.impressions i "
         f"      JOIN iceberg.db.bid_responses r ON r.response_id = i.response_id "
         f"      WHERE r.request_id = br.request_id "
-        f"      AND i.event_timestamp > TIMESTAMP '{watermark}')"
+        f"      AND i.event_timestamp > TIMESTAMP WITH TIME ZONE '{watermark}')"
         f"    OR EXISTS (SELECT 1 FROM iceberg.db.clicks c "
         f"      JOIN iceberg.db.impressions i ON i.impression_id = c.impression_id "
         f"      JOIN iceberg.db.bid_responses r ON r.response_id = i.response_id "
         f"      WHERE r.request_id = br.request_id "
-        f"      AND c.event_timestamp > TIMESTAMP '{watermark}')"
+        f"      AND c.event_timestamp > TIMESTAMP WITH TIME ZONE '{watermark}')"
         f"  )"
         f")"
     )

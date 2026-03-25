@@ -88,18 +88,19 @@ def _build_task_group(entry: MaterializationEntry, upstream):
 
         watermark = _check_or_full_load()
         p0 = _pass_0(watermark)
-        _pass_1(watermark, p0)
+        p1 = _pass_1(watermark, p0)
         p2 = _pass_2(watermark)
+        p1 >> p2
 
         if entry.has_funnel_repair:
 
             @task(task_id="pass_3_funnel_repair")
-            def _pass_3(watermark, **context):
+            def _pass_3(watermark, _after_pass2, **context):
                 if watermark is None:
                     return 0
                 return pass_3_funnel_repair(watermark)
 
-            _pass_3(watermark) >> _update_watermark()
+            _pass_3(watermark, p2) >> _update_watermark()
         else:
             p2 >> _update_watermark()
 
